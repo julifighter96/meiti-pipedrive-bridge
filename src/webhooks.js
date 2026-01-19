@@ -291,10 +291,15 @@ async function handleNewConversation(payload) {
  */
 async function handleConversationPaused(payload) {
   try {
-    const { projectData } = payload;
+    const { contactData, projectData, callbackUrl } = payload;
+    
+    log('info', '⏸️  ConversationPaused event received', {
+      hasDeal: !!projectData?.crmProjectId,
+      hasContact: !!contactData?.phoneNumber
+    });
     
     // If we have a deal, add activity
-    if (projectData.crmProjectId) {
+    if (projectData?.crmProjectId) {
       await createActivity({
         subject: 'Chat Konversation pausiert (10+ Min Inaktivität)',
         type: 'task',
@@ -304,11 +309,68 @@ async function handleConversationPaused(payload) {
       
       log('info', `📝 Pause activity logged for deal ${projectData.crmProjectId}`);
     } else {
-      log('warn', `⚠️  No deal ID to log pause activity`);
+      // No deal exists - create one with person
+      log('info', '💼 No deal found, creating deal for paused conversation');
+      
+      if (!contactData?.phoneNumber) {
+        log('warn', '⚠️  No contact data available to create deal');
+        return;
+      }
+      
+      // Find or create person
+      const person = await findOrCreatePerson({
+        phone: contactData.phoneNumber,
+        firstName: contactData.firstName,
+        lastName: contactData.lastName,
+        email: contactData.email,
+        company: contactData.company
+      });
+      
+      // Create deal
+      const deal = await createDeal({
+        title: generateDealTitle({
+          projectName: projectData?.projectName,
+          contactData: contactData,
+          eventType: 2, // Treat as conversation
+          timestampUtc: payload.timestampUtc
+        }),
+        personId: person.id,
+        value: 0,
+        currency: 'EUR'
+      });
+      
+      log('info', `💼 Deal created for paused conversation: ${deal.title} (ID: ${deal.id})`);
+      
+      // Add pause activity
+      await createActivity({
+        subject: 'Chat Konversation pausiert (10+ Min Inaktivität)',
+        type: 'task',
+        personId: person.id,
+        dealId: deal.id,
+        note: `Konversation pausiert nach 10 Minuten Inaktivität.\nZusammenfassung: ${projectData?.currentSummary || 'Keine Zusammenfassung verfügbar'}\nDatum: ${payload.timestampUtc}`
+      });
+      
+      // Send IDs back to Meiti
+      if (callbackUrl) {
+        await sendCallback(callbackUrl, {
+          requestContactUpdate: true,
+          contactData: {
+            crmContactId: String(person.id)
+          },
+          requestProjectUpdate: true,
+          projectData: {
+            crmProjectId: String(deal.id),
+            crmAiInfo: `Deal erstellt nach Pause-Event. Deal ID: ${deal.id}`
+          }
+        });
+      }
     }
     
   } catch (error) {
-    log('error', '❌ ConversationPaused handler failed', { error: error.message });
+    log('error', '❌ ConversationPaused handler failed', { 
+      error: error.message,
+      stack: error.stack 
+    });
     throw error;
   }
 }
