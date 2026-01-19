@@ -13,6 +13,70 @@ const EVENT_TYPES = {
 };
 
 /**
+ * Generate optimized deal title
+ */
+function generateDealTitle({ projectName, contactData, eventType, timestampUtc }) {
+  // Use project name if available
+  if (projectName && projectName.trim()) {
+    return projectName.trim();
+  }
+  
+  // Build contact name
+  const firstName = contactData?.firstName?.trim() || '';
+  const lastName = contactData?.lastName?.trim() || '';
+  const contactName = [firstName, lastName].filter(Boolean).join(' ') || contactData?.company?.trim() || '';
+  
+  // Format date (if timestamp available)
+  let dateStr = '';
+  if (timestampUtc) {
+    try {
+      const date = new Date(timestampUtc);
+      dateStr = date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    } catch (e) {
+      // Ignore date parsing errors
+    }
+  }
+  
+  // Event-specific titles
+  let eventPrefix = '';
+  switch (eventType) {
+    case 1: // FinishedCall
+      eventPrefix = 'Anruf';
+      break;
+    case 2: // NewConversation
+      eventPrefix = 'Chat-Anfrage';
+      break;
+    case 4: // Manual
+      eventPrefix = 'Anfrage';
+      break;
+    default:
+      eventPrefix = 'Kontakt';
+  }
+  
+  // Build title
+  const parts = [];
+  
+  if (contactName) {
+    parts.push(contactName);
+  }
+  
+  if (eventPrefix) {
+    parts.push(eventPrefix);
+  }
+  
+  if (dateStr) {
+    parts.push(dateStr);
+  }
+  
+  // Fallback to phone number if no name
+  if (!contactName && contactData?.phoneNumber) {
+    parts.push(contactData.phoneNumber);
+  }
+  
+  return parts.length > 0 ? parts.join(' - ') : 'Neue Anfrage';
+}
+
+/**
  * Main webhook handler - dispatches to specific event handlers
  */
 async function handleMeitiWebhook(payload) {
@@ -106,9 +170,14 @@ async function handleFinishedCall(payload) {
     
     log('info', `👤 Person: ${person.name} (ID: ${person.id})`);
     
-    // Create deal
+    // Create deal with optimized title
     const deal = await createDeal({
-      title: projectData.projectName || `Anruf beendet - ${contactData.phoneNumber}`,
+      title: generateDealTitle({
+        projectName: projectData.projectName,
+        contactData: contactData,
+        eventType: 1, // FinishedCall
+        timestampUtc: payload.timestampUtc
+      }),
       personId: person.id,
       value: 0,
       currency: 'EUR'
@@ -182,7 +251,12 @@ async function handleNewConversation(payload) {
     });
     
     const deal = await createDeal({
-      title: projectData.projectName || `Chat Anfrage - ${contactData.phoneNumber}`,
+      title: generateDealTitle({
+        projectName: projectData.projectName,
+        contactData: contactData,
+        eventType: 2, // NewConversation
+        timestampUtc: payload.timestampUtc
+      }),
       personId: person.id,
       value: 0,
       currency: 'EUR'
@@ -263,7 +337,12 @@ async function handleManualTrigger(payload) {
     
     if (!dealId) {
       const deal = await createDeal({
-        title: projectData.projectName || `Manueller Trigger - ${contactData.phoneNumber}`,
+        title: generateDealTitle({
+          projectName: projectData.projectName,
+          contactData: contactData,
+          eventType: 4, // Manual
+          timestampUtc: payload.timestampUtc
+        }),
         personId: person.id,
         value: 0,
         currency: 'EUR'
