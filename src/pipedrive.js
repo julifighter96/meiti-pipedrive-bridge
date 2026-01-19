@@ -7,6 +7,16 @@ const PIPEDRIVE_DOMAIN = process.env.PIPEDRIVE_DOMAIN || 'api.pipedrive.com';
 const PIPELINE_ID = process.env.PIPELINE_ID; // Optional: Default pipeline
 const STAGE_ID = process.env.STAGE_ID; // Optional: Default stage
 
+// Validate API token is present
+if (!PIPEDRIVE_API_TOKEN) {
+  log('error', '❌ PIPEDRIVE_API_TOKEN is not set!');
+  log('error', '💡 Set it in Railway: Settings → Variables → Add PIPEDRIVE_API_TOKEN');
+} else {
+  // Log token status (first 8 chars only for security)
+  const tokenPreview = PIPEDRIVE_API_TOKEN.substring(0, 8) + '...';
+  log('info', `🔑 Pipedrive API token loaded (${tokenPreview})`);
+}
+
 // Base API client
 const api = axios.create({
   baseURL: `https://${PIPEDRIVE_DOMAIN}/v1`,
@@ -41,7 +51,13 @@ async function searchPersonByPhone(phone) {
     return null;
     
   } catch (error) {
-    log('error', '❌ Person search failed', { error: error.message });
+    if (error.response?.status === 401) {
+      log('error', '❌ Person search failed - Authentication error (401)');
+      log('error', '💡 Check that PIPEDRIVE_API_TOKEN is correct in Railway environment variables');
+      log('error', '💡 Get your token from: https://app.pipedrive.com/settings/api');
+    } else {
+      log('error', '❌ Person search failed', { error: error.message });
+    }
     throw error;
   }
 }

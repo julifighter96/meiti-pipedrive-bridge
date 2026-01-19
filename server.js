@@ -2,7 +2,17 @@
 require('dotenv').config();
 const express = require('express');
 const { handleMeitiWebhook } = require('./src/webhooks');
-const { log } = require('./src/utils');
+const { log, validateEnv } = require('./src/utils');
+
+// Validate required environment variables at startup
+try {
+  validateEnv();
+  log('success', '✅ Environment variables validated');
+} catch (error) {
+  log('error', '❌ Configuration error', { error: error.message });
+  log('error', '💡 Please set PIPEDRIVE_API_TOKEN in Railway environment variables');
+  process.exit(1);
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
