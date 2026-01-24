@@ -4,8 +4,8 @@ const { log } = require('./utils');
 
 const PIPEDRIVE_API_TOKEN = process.env.PIPEDRIVE_API_TOKEN;
 const PIPEDRIVE_DOMAIN = process.env.PIPEDRIVE_DOMAIN || 'api.pipedrive.com';
-const PIPELINE_ID = process.env.PIPELINE_ID; // Optional: Default pipeline
-const STAGE_ID = process.env.STAGE_ID; // Optional: Default stage
+const PIPELINE_ID = 2; // Optional: Default pipeline
+const STAGE_ID = 10; // Optional: Default stage
 
 // Validate API token is present
 if (!PIPEDRIVE_API_TOKEN) {
