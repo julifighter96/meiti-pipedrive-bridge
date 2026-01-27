@@ -1,5 +1,5 @@
 // src/webhooks.js - Meiti Webhook Handler
-const { findOrCreatePerson, createDeal, createActivity } = require('./pipedrive');
+const { findOrCreatePerson, createDeal, createActivity, getDeal } = require('./pipedrive');
 const { sendCallback } = require('./meiti');
 const { log } = require('./utils');
 
@@ -153,11 +153,47 @@ async function handleIncomingCall(payload) {
 
 /**
  * Event Type 1: Finished Call
- * Action: Create Deal + Activity
+ * Action: Create Deal + Activity (only if meaningful content exists)
  */
 async function handleFinishedCall(payload) {
   try {
     const { contactData, projectData, callbackUrl } = payload;
+    
+    // Check if we already have a deal
+    const existingDealId = projectData?.crmProjectId;
+    
+    // Check if there's meaningful project content
+    const hasProjectName = projectData?.projectName?.trim();
+    const hasSummary = projectData?.currentSummary?.trim();
+    const hasProjectContent = hasProjectName || hasSummary;
+    
+    // If no deal exists and no project content, skip creating a meaningless card
+    if (!existingDealId && !hasProjectContent) {
+      log('info', '⏭️  Skipping deal creation: No existing deal and no project content (projectName or summary)');
+      
+      // Still find/create person for contact tracking, but don't create deal/activity
+      const person = await findOrCreatePerson({
+        phone: contactData.phoneNumber,
+        firstName: contactData.firstName,
+        lastName: contactData.lastName,
+        email: contactData.email,
+        company: contactData.company
+      });
+      
+      log('info', `👤 Person: ${person.name} (ID: ${person.id}) - No deal created due to missing content`);
+      
+      // Send only contact update back to Meiti (no deal)
+      if (callbackUrl) {
+        await sendCallback(callbackUrl, {
+          requestContactUpdate: true,
+          contactData: {
+            crmContactId: String(person.id)
+          }
+        });
+      }
+      
+      return;
+    }
     
     // Find or create person
     const person = await findOrCreatePerson({
@@ -170,29 +206,47 @@ async function handleFinishedCall(payload) {
     
     log('info', `👤 Person: ${person.name} (ID: ${person.id})`);
     
-    // Create deal with optimized title
-    const deal = await createDeal({
-      title: generateDealTitle({
-        projectName: projectData.projectName,
-        contactData: contactData,
-        eventType: 1, // FinishedCall
-        timestampUtc: payload.timestampUtc
-      }),
-      personId: person.id,
-      value: 0,
-      currency: 'EUR'
-    });
+    let deal;
     
-    log('info', `💼 Deal created: ${deal.title} (ID: ${deal.id})`);
+    // Use existing deal if available
+    if (existingDealId) {
+      log('info', `💼 Using existing deal: ${existingDealId}`);
+      // Get deal details for activity
+      deal = await getDeal(parseInt(existingDealId));
+      if (!deal) {
+        log('warn', `⚠️  Deal ${existingDealId} not found, creating new deal`);
+        deal = null; // Will create new one below
+      }
+    }
+    
+    // Create new deal if we don't have one
+    if (!deal) {
+      deal = await createDeal({
+        title: generateDealTitle({
+          projectName: projectData?.projectName,
+          contactData: contactData,
+          eventType: 1, // FinishedCall
+          timestampUtc: payload.timestampUtc
+        }),
+        personId: person.id,
+        value: 0,
+        currency: 'EUR'
+      });
+      
+      log('info', `💼 Deal created: ${deal.title} (ID: ${deal.id})`);
+    }
     
     // Create activity to log the call
+    const summaryNote = projectData?.currentSummary?.trim() 
+      ? `Zusammenfassung: ${projectData.currentSummary}\n` 
+      : '';
     await createActivity({
       subject: 'Anruf über Meiti beendet',
       type: 'call',
       done: true,
       personId: person.id,
       dealId: deal.id,
-      note: `Anruf über Meiti beendet.\nTelefon: ${contactData.phoneNumber}\nDatum: ${payload.timestampUtc}`
+      note: `Anruf über Meiti beendet.\nTelefon: ${contactData.phoneNumber}\n${summaryNote}Datum: ${payload.timestampUtc}`
     });
     
     log('info', `📝 Activity logged for call`);
